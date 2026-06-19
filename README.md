@@ -1,8 +1,6 @@
 # go-systems
 My golang codes
 
-# go-works
-
 A collection of independent Go tools and experiments — desktop apps, Android utilities, file encryption, image processing, and audio capture. Built on Bazzite Linux using an Ubuntu 24.04 Distrobox container.
 
 ---
@@ -12,7 +10,7 @@ A collection of independent Go tools and experiments — desktop apps, Android u
 ### 🔗 t5code — Map-Based Linked List (CLI prototype)
 `t5code.go`
 
-A terminal prototype for a map-based ordered linked list. Each key is a string; each value is a `[prevIndex, currentIndex]` int pair. Supports append and delete with automatic reindexing. The data structure that underpins the image viewer and PDF reader.
+A terminal prototype for a map-based ordered linked list. Each key is a string; each value is a `[prevIndex, currentIndex]` int pair. Supports append and delete with automatic reindexing. The data structure that underpins the image viewer and PDF reader. This concept is later used to build Multi-PDF apk using Dart and flutter which is available as a pre-release.
 
 ```
 go run t5code.go
@@ -67,7 +65,7 @@ fyne package -os android -appID com.yourname.fincalc   # Android APK
 
 ---
 
-### 🔒 scrambler + unscramble — File Scrambler
+###  scrambler + unscramble — File Scrambler
 `scrambler.go` · `unscramble.go`
 
 A two-file encryption utility that scrambles any file's bytes using a geometric transposition scheme.
@@ -91,7 +89,7 @@ go run unscramble.go     # prompts for scrambled file + key file
 
 ---
 
-### 🎨 t33code — Text-on-Image Renderer
+###  t33code — Text-on-Image Renderer
 `t33code.go`
 
 Takes an image and a text/code file, then re-renders the image by replacing each pixel with a 5×5 bitmap glyph drawn in that pixel's original color. The glyph characters cycle through the content of the text file, stripping whitespace first.
