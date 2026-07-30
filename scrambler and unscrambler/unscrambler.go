@@ -2,79 +2,94 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 )
 
 func main() {
-	// This is the unscrambler
-BEGINNING:
-	fmt.Println("Enter the name of scrambled file:")
-	i := bufio.NewReader(os.Stdin)
-	scramFile, e1 := i.ReadString('\n')
-	if e1 != nil {
-		fmt.Println("Error: ", e1)
-		goto BEGINNING
-	}
-	scramFile = strings.TrimSpace(scramFile)
-	scramContents, e2 := os.ReadFile(scramFile)
-	if e2 != nil {
-		fmt.Println("Error: ", e2)
-		goto BEGINNING
-	}
+	reader := bufio.NewReader(os.Stdin)
 
-	// .......................................
-
-	fmt.Println("Enter the name of key file:")
-	j := bufio.NewReader(os.Stdin)
-	keyFile, e3 := j.ReadString('\n')
-	if e3 != nil {
-		fmt.Println("Error: ", e3)
-		goto BEGINNING
-	}
-	keyFile = strings.TrimSpace(keyFile)
-	keyContents, e4 := os.ReadFile(keyFile)
-	if e4 != nil {
-		fmt.Println("Error: ", e4)
-		goto BEGINNING
-	}
-
-	for ini := 0; ini < 8; ini++ {
-		if scramContents[ini] != keyContents[ini] {
-			fmt.Println("Wrong pair!")
-			goto BEGINNING
+	for {
+		// 1. Read Scrambled File
+		scramFile, err := promptInput(reader, "Enter the name of scrambled file: ")
+		if err != nil {
+			fmt.Println("Error:", err)
+			continue
 		}
+
+		scramContents, err := os.ReadFile(scramFile)
+		if err != nil {
+			fmt.Println("Error reading scrambled file:", err)
+			continue
+		}
+
+		// 2. Read Key File
+		keyFile, err := promptInput(reader, "Enter the name of key file: ")
+		if err != nil {
+			fmt.Println("Error:", err)
+			continue
+		}
+
+		keyContents, err := os.ReadFile(keyFile)
+		if err != nil {
+			fmt.Println("Error reading key file:", err)
+			continue
+		}
+
+		// 3. Validation Check (First 8 bytes header match)
+		if len(scramContents) < 8 || len(keyContents) < 12 || !bytes.Equal(scramContents[:8], keyContents[:8]) {
+			fmt.Println("Error: Wrong file pair or invalid header!")
+			continue
+		}
+
+		fmt.Println("Header match verified! Decrypting...")
+
+		// Decode original byte length from big-endian uint32
+		dataLen := binary.BigEndian.Uint32(keyContents[8:12])
+		fmt.Printf("%d data bytes will be unscrambled\n", dataLen)
+
+		scramData := scramContents[8:]
+		pointData := keyContents[12:]
+
+		total := len(scramData)
+		if len(pointData) < total*4 {
+			fmt.Println("Error: Key file is corrupted or truncated!")
+			continue
+		}
+
+		// 4. Unscramble Direct Memory Mapping (Fast & Safe)
+		unscrambledOutput := make([]byte, total)
+		for k := 0; k < total; k++ {
+			pos := binary.BigEndian.Uint32(pointData[k*4 : (k+1)*4])
+			if int(pos) < len(unscrambledOutput) {
+				unscrambledOutput[pos] = scramData[k]
+			}
+		}
+
+		// 5. Output File Creation
+		baseName := filepath.Base(scramFile)
+		outFileName := "unscrambled_" + strings.TrimSuffix(baseName, "scrambled.txt")
+
+		err = os.WriteFile(outFileName, unscrambledOutput[:dataLen], 0644)
+		if err != nil {
+			fmt.Println("Error writing unscrambled file:", err)
+			continue
+		}
+
+		fmt.Println("Successfully restored file:", outFileName)
+		break
 	}
+}
 
-	fmt.Println("The scram file can be decrypted with the key file!")
-	n := int(keyContents[8])<<24 | int(keyContents[9])<<16 | int(keyContents[10])<<8 | int(keyContents[11])
-	fmt.Printf("%d data bytes can be unscrambled\n", n)
-
-	scramData := scramContents[8:]
-	pointData := keyContents[12:]
-
-	// fmt.Println(len(scramData))
-	total := len(scramData)
-	unscrambledOutput := make([]byte, total)
-
-	var wg sync.WaitGroup
-	cap := make(chan struct{}, 2000)
-	for k := range total {
-		wg.Add(1)
-		cap <- struct{}{}
-		go func(k int) {
-			defer wg.Done()
-			defer func() { <-cap }()
-			position := (int(pointData[k*4]) << 24) | (int(pointData[((k*4)+1)]) << 16) | (int(pointData[((k*4)+2)]) << 8) | int(pointData[((k*4)+3)])
-			unscrambledOutput[position] = scramData[k]
-		}(k)
+func promptInput(r *bufio.Reader, prompt string) (string, error) {
+	fmt.Print(prompt)
+	input, err := r.ReadString('\n')
+	if err != nil {
+		return "", err
 	}
-
-	wg.Wait()
-	file_n := filepath.Base(scramFile)
-	outputFileName := strings.TrimSuffix("unscrambled"+file_n, "scrambled.txt")
-	os.WriteFile(outputFileName, unscrambledOutput[:n], 0644)
+	return strings.TrimSpace(input), nil
 }
