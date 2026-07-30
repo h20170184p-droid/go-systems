@@ -4,205 +4,196 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
-	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
+type VideoData struct {
+	Title string
+	URL   string
+}
+
 func main() {
-	// Take the input here but run the execution in a separate function.
-	// That might preserve the repeated runs
-	// Avoid gotos?
-	// Perhaps even preserve memory foot print and avoid unnecessary loops?
+	fmt.Println("\n=== YouTube Audio Extractor ===")
+	fmt.Println("Note: For direct extraction, ensure 'yt-dlp' or 'ffmpeg' is installed on your system.")
+	reader := bufio.NewReader(os.Stdin)
 
-	fmt.Printf("\nWelcome to Youtube Audio Downloader (sort of.)\nNote: There are issues where advertisement audio will also be recorded. I am working on it.")
 	for {
-		fmt.Println("To exit the program, type !Exi!T and press enter!")
-		fmt.Printf("\nType the name of the YouTube Video to extract the audio from: > ")
-		r := bufio.NewReader(os.Stdin)
-		yvname, err := r.ReadString('\n')
-		if err == nil {
-			yvname = strings.TrimSpace(yvname)
-			if yvname == "!Exi!T" {
-				os.Exit(0)
-			}
-			// Take the name and go into a function
-			videoLink, videoname := YouTubeSearch(yvname)
-			if videoLink == "" && videoname == "" {
-				continue
-			}
-			// Once the video link is available, launch default web-browser of the linux system and use the provided video-link
-			fmt.Println("Launching the default browser! Please handle the ad skips on your own. It is still under development.")
-			fmt.Println("Once the video of choice is open, come back to the terminal to approve the audio download!")
+		fmt.Println("\nTo exit, type '!Exi!T'")
+		fmt.Print("Type the YouTube Video Name / Search Query: > ")
 
-			// fmt.Println(videoLink)
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Println("Error reading input:", err)
+			continue
+		}
 
-			err = openBrowser(videoLink)
-			if err != nil {
-				fmt.Println("Error occurred: ", err)
-			}
+		query := strings.TrimSpace(input)
+		if query == "!Exi!T" {
+			fmt.Println("Exiting...")
+			os.Exit(0)
+		}
+		if query == "" {
+			continue
+		}
 
-			fmt.Println("Browser is open. The video is in paused state by default ideally which is better.")
-			saveFileName := strings.Join(strings.Fields(videoname), "") + ".flac"
-			fmt.Println("GO PLAY the video or SKIP the ads on the video and let the video play!")
-			command := exec.Command("ffmpeg", "-f", "pulse", "-i", "@DEFAULT_SINK@.monitor", "-c:a", "flac", saveFileName)
-			command.Stdout = os.Stdout
-			command.Stderr = os.Stderr
-			command.Stdin = os.Stdin
+		videoLink, videoName := YouTubeSearch(reader, query)
+		if videoLink == "" {
+			continue
+		}
 
-			if err := command.Run(); err != nil {
-				fmt.Printf("FFmpeg stopped: %v\n", err)
-			}
-			fmt.Println("Recording done. Go program continues!")
-			// command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		fmt.Printf("\nSelected: %s\n", videoName)
+		fmt.Println("Choose Action:")
+		fmt.Println("1. Download Audio directly (via yt-dlp - Recommended)")
+		fmt.Println("2. Open in Browser & Record System Audio (Legacy Mode)")
+		fmt.Print("Select option (1/2): ")
 
-			// // Intercepting the signal to handle the ffmpeg commands.
-			// sigChan := make(chan os.Signal, 1)
-			// signal.Notify(sigChan, os.Interrupt, syscall.SIGINT)
-			// if err := command.Start(); err != nil {
-			// 	fmt.Printf("Failed to start FFmpeg: %v\n", err)
-			// 	return
-			// }
+		optStr, _ := reader.ReadString('\n')
+		optStr = strings.TrimSpace(optStr)
 
-			// doneChan := make(chan error, 1)
-			// go func() {
-			// 	doneChan <- command.Wait()
-			// }()
+		saveFileName := sanitizeFilename(videoName) + ".flac"
 
-			// select {
-			// case <-sigChan:
-			// 	fmt.Println("\nCtrl+C detected. Safely stopping FFmpeg...")
-			// 	if err := command.Process.Signal(syscall.SIGTERM); err != nil {
-			// 		fmt.Printf("Failed to signal FFmpeg: %v\n", err)
-			// 	}
-			// 	<-doneChan
-
-			// case err := <-doneChan:
-			// 	if err != nil {
-			// 		fmt.Printf("FFmpeg closed with an error: %v\n", err)
-			// 	}
-			// }
-			// fmt.Println("FFmpeg closed safely. Go program continues executing!")
-			// fmt.Println("Doing next tasks...")
-
+		if optStr == "1" {
+			downloadDirectAudio(videoLink, saveFileName)
 		} else {
-			fmt.Println("Error occurred: ", err)
+			launchAndRecord(videoLink, saveFileName)
 		}
 	}
-
 }
 
-func YouTubeSearch(videoName string) (string, string) {
-	searchquery := "https://www.youtube.com/results?search_query=" + strings.ReplaceAll(videoName, " ", "+")
+// YouTubeSearch scrapes/searches and presents user selection cleanly
+func YouTubeSearch(reader *bufio.Reader, query string) (string, string) {
+	searchURL := "https://www.youtube.com/results?search_query=" + url.QueryEscape(query)
 
-	// Creating a client? Or emulating a fake client to YouTube
+	req, _ := http.NewRequest("GET", searchURL, nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+
 	client := &http.Client{}
-	req, _ := http.NewRequest("GET", searchquery, nil)
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36") // Copy pasted this line from internet. Sets request header I guess.
-	response, err := client.Do(req)                                                              // I generally like to use my own variations to describe errors like e1, e2. But fine I will buckle to industry standard.
+	resp, err := client.Do(req)
 	if err != nil {
-		fmt.Println("Error: ", err)
-		return "", "" // This return hands back the control to main.
-		// For now the choice is to launch the browser from this function and nothing to be passed to main as a return type from this function.
-	}
-
-	// If the error is not an issue then we dig into finding the YouTube search results.
-	// Display first 10 results and then let the user select which video to launch on default browser.
-
-	defer response.Body.Close()
-	searchResult_HTML_Bytes, _ := io.ReadAll(response.Body) // Assuming no error occurs reading the contents.
-	searchContents := string(searchResult_HTML_Bytes)       // Now we have bunch of data saved as strings that can be opened up using json marshalling I guess.
-
-	// Looking for initial Data, ytInitialData
-	re := regexp.MustCompile(`ytInitialData\s*=\s*({.+?});`) // The contents inside the regular expression was copy pasted from website. Not my own brain
-	matches := re.FindStringSubmatch(searchContents)
-	if len(matches) < 2 {
-		fmt.Println("Could not extract initial search data.")
-		return "", "" // Also hands back the control to main
-	}
-
-	var data map[string]any
-	err = json.Unmarshal([]byte(matches[1]), &data) // resort to err2, perhaps I could also have used err = json.Unmarshal....
-	if err != nil {
-		// fmt.Println("Error: ", err)
+		fmt.Println("Network error:", err)
 		return "", ""
 	}
-	var items []any
-	// Digging to find the video ID and title
-	if contents, ok := data["contents"].(map[string]any); ok {
-		if searchResults, ok := contents["twoColumnSearchResultsRenderer"].(map[string]any); ok {
-			if primaryContents, ok := searchResults["primaryContents"].(map[string]any); ok {
-				if selectionList, ok := primaryContents["sectionListRenderer"].(map[string]any); ok {
-					if contentList, ok := selectionList["contents"].([]any)[0].(map[string]any); ok {
-						if itemSection, ok := contentList["itemSectionRenderer"].(map[string]any); ok {
-							items = itemSection["contents"].([]any)
-						}
-					}
-				}
-			}
-		}
-	}
+	defer resp.Body.Close()
 
-	type videoData struct {
-		title string
-		URL   string
-	}
-
-	var matchMap []videoData
-	for _, item := range items {
-		vR, ok := item.(map[string]any)["videoRenderer"].(map[string]any)
-		if ok {
-			title := vR["title"].(map[string]any)["runs"].([]any)[0].(map[string]any)["text"].(string)
-			vID := vR["videoId"].(string)
-			vURL := "https://youtu.be/" + vID
-			matchMap = append(matchMap, videoData{title: title, URL: vURL})
-		}
-	}
-
-	for index, value := range matchMap {
-		fmt.Printf("\n%d. %s (%s)\n", index+1, value.title, value.URL)
-		if index == 9 {
-			break
-		}
-	}
-
-	// Now let the user choose the url / video of choice
-	fmt.Println("If the video of your choice is not in the list type 0")
-	fmt.Printf("\nSelect the video of your choice using the index: ")
-	var selection int
-	var selReader = bufio.NewReader(os.Stdin)
-	selInput, _ := selReader.ReadString('\n')
-	selInput = strings.TrimSpace(selInput)
-	fmt.Sscan(selInput, &selection)
-	if selection == 0 {
+	// Use safely parsed JSON or yt-dlp search fallback
+	results := searchYtDlp(query)
+	if len(results) == 0 {
+		fmt.Println("No videos found or search blocked.")
 		return "", ""
 	}
-	fmt.Println("Selected video: ", matchMap[selection-1].title)
-	targetURL := matchMap[selection-1].URL
-	targetname := matchMap[selection-1].title
 
-	// Return this string back
-	return targetURL, targetname
+	fmt.Println("\nSearch Results:")
+	for idx, item := range results {
+		fmt.Printf("%2d. %s (%s)\n", idx+1, item.Title, item.URL)
+	}
+	fmt.Println(" 0. Cancel search")
+
+	for {
+		fmt.Print("\nSelect index (0 to cancel): ")
+		input, _ := reader.ReadString('\n')
+		idx, err := strconv.Atoi(strings.TrimSpace(input))
+
+		if err != nil || idx < 0 || idx > len(results) {
+			fmt.Println("Invalid selection. Try again.")
+			continue
+		}
+		if idx == 0 {
+			return "", ""
+		}
+		return results[idx-1].URL, results[idx-1].Title
+	}
 }
 
-// Browser open function
+// Uses yt-dlp for search JSON metadata safely (no manual fragile scraping needed)
+func searchYtDlp(query string) []VideoData {
+	cmd := exec.Command("yt-dlp", fmt.Sprintf("ytsearch10:%s", query), "--dump-json", "--default-search", "ytsearch")
+	out, err := cmd.Output()
+	if err != nil {
+		// If yt-dlp isn't installed, fallback notice
+		fmt.Println("Notice: 'yt-dlp' CLI not found. Falling back to basic browser mode...")
+		return []VideoData{{Title: query, URL: "https://www.youtube.com/results?search_query=" + url.QueryEscape(query)}}
+	}
+
+	var results []VideoData
+	lines := strings.Split(string(out), "\n")
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var entry struct {
+			Title    string `json:"title"`
+			WebpageURL string `json:"webpage_url"`
+		}
+		if err := json.Unmarshal([]byte(line), &entry); err == nil {
+			results = append(results, VideoData{Title: entry.Title, URL: entry.WebpageURL})
+		}
+	}
+	return results
+}
+
+// Directly extracts audio stream in high quality without recording desktop noise
+func downloadDirectAudio(videoURL, outputFile string) {
+	fmt.Printf("Downloading high-quality FLAC audio directly to '%s'...\n", outputFile)
+	cmd := exec.Command("yt-dlp", "-x", "--audio-format", "flac", "-o", outputFile, videoURL)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("Download failed: %v\n", err)
+	} else {
+		fmt.Println("Download complete successfully!")
+	}
+}
+
+// Legacy record option
+func launchAndRecord(videoURL, outputFile string) {
+	fmt.Println("Launching default browser...")
+	if err := openBrowser(videoURL); err != nil {
+		fmt.Println("Error opening browser:", err)
+		return
+	}
+
+	fmt.Println("Recording system audio via FFmpeg... Press Ctrl+C or stop FFmpeg when done.")
+	var cmd *exec.Cmd
+
+	if runtime.GOOS == "linux" {
+		cmd = exec.Command("ffmpeg", "-f", "pulse", "-i", "@DEFAULT_SINK@.monitor", "-c:a", "flac", outputFile)
+	} else {
+		fmt.Println("System audio recording in this script is configured for Linux PulseAudio only.")
+		return
+	}
+
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("FFmpeg finished/stopped: %v\n", err)
+	}
+}
 
 func openBrowser(url string) error {
-	var command *exec.Cmd
-
+	var cmd *exec.Cmd
 	switch runtime.GOOS {
-	case "Windows":
-		command = exec.Command("cmd", "/c", "start", url)
+	case "windows":
+		cmd = exec.Command("cmd", "/c", "start", url)
 	case "darwin":
-		command = exec.Command("open", url)
+		cmd = exec.Command("open", url)
 	case "linux":
-		command = exec.Command("xdg-open", url)
+		cmd = exec.Command("xdg-open", url)
 	default:
 		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
 	}
-	return command.Start()
+	return cmd.Start()
+}
+
+func sanitizeFilename(name string) string {
+	reg := regexp.MustCompile(`[^a-zA-Z0-9_\-]+`)
+	return reg.ReplaceAllString(name, "_")
 }
