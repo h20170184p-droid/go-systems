@@ -1,139 +1,199 @@
 package main
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
-	"math"
+	"net/http"
+	"net/url"
+	"os"
+	"os/exec"
+	"runtime"
 	"strconv"
-	"time"
-
-	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/app"
-	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/layout"
-	"fyne.io/fyne/v2/widget"
+	"strings"
 )
 
-type mobileEntry struct {
-	widget.Entry
-	scroll *container.Scroll
-}
-
-func newMobileEntry(placeholder string, scroll *container.Scroll) *mobileEntry {
-	e := &mobileEntry{scroll: scroll}
-	e.ExtendBaseWidget(e)
-	e.PlaceHolder = placeholder
-	return e
-}
-
-func (e *mobileEntry) FocusGained() {
-	e.Entry.FocusGained()
-	if e.scroll != nil {
-		go func() {
-			time.Sleep(250 * time.Millisecond)
-			fyne.Do(func() {
-				e.scroll.ScrollToOffset(fyne.NewPos(0, e.Position().Y-40))
-			})
-		}()
-	}
-}
-
-// calcBlock encapsulates the creation of a calculation section
-func calcBlock(
-	title string,
-	placeholders [3]string,
-	scroll *container.Scroll,
-	outLabel1Prefix, outLabel2Prefix string,
-	calcFunc func(v1, v2, v3 float64) (float64, float64),
-) fyne.CanvasObject {
-	e1 := newMobileEntry(placeholders[0], scroll)
-	e2 := newMobileEntry(placeholders[1], scroll)
-	e3 := newMobileEntry(placeholders[2], scroll)
-
-	out1 := widget.NewLabel(outLabel1Prefix + ": ...")
-	out2 := widget.NewLabel(outLabel2Prefix + ": ...")
-
-	recalc := func(string) {
-		f1, err1 := strconv.ParseFloat(e1.Text, 64)
-		f2, err2 := strconv.ParseFloat(e2.Text, 64)
-		f3, err3 := strconv.ParseFloat(e3.Text, 64)
-
-		if err1 == nil && err2 == nil && err3 == nil {
-			r1, r2 := calcFunc(f1, f2, f3)
-			out1.SetText(fmt.Sprintf("%s: %.2f", outLabel1Prefix, r1))
-			out2.SetText(fmt.Sprintf("%s: %.2f", outLabel2Prefix, r2))
-		} else {
-			out1.SetText(outLabel1Prefix + ": ...")
-			out2.SetText(outLabel2Prefix + ": ...")
-		}
-	}
-
-	e1.OnChanged = recalc
-	e2.OnChanged = recalc
-	e3.OnChanged = recalc
-
-	return container.NewVBox(
-		container.New(layout.NewCenterLayout(), widget.NewLabel(title)),
-		e1, e2, e3, out1, out2,
-	)
+type VideoData struct {
+	Title string
+	URL   string
 }
 
 func main() {
-	a := app.New()
-	w := a.NewWindow("Financial Calculator")
+	fmt.Println("\n=== YouTube Audio Extractor ===")
+	fmt.Println("Note: For direct extraction, ensure 'yt-dlp' or 'ffmpeg' is installed on your system.")
+	reader := bufio.NewReader(os.Stdin)
 
-	scroll1 := container.NewVScroll(nil)
-	scroll2 := container.NewVScroll(nil)
+	for {
+		fmt.Println("\nTo exit, type '!Exi!T'")
+		fmt.Print("Type the YouTube Video Name / Search Query: > ")
 
-	// --- FD Section Blocks ---
-	fdBlock := calcBlock("FD", [3]string{"Initial Amount", "Annual rate of interest", "Period of deposit in Years"}, scroll1, "Maturity value", "Interest",
-		func(p, r, t float64) (float64, float64) {
-			mv := p * math.Pow(1+(r/400), t*4)
-			return mv, mv - p
-		})
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Println("Error reading input:", err)
+			continue
+		}
 
-	revFd1 := calcBlock("Reverse FD - Compute Initial Amount", [3]string{"Maturity Value", "Annual rate of interest", "Period of deposit in Years"}, scroll1, "Initial amount", "Interest",
-		func(mv, r, t float64) (float64, float64) {
-			p := mv / math.Pow(1+(r/400), t*4)
-			return p, mv - p
-		})
+		query := strings.TrimSpace(input)
+		if query == "!Exi!T" {
+			fmt.Println("Exiting...")
+			os.Exit(0)
+		}
+		if query == "" {
+			continue
+		}
 
-	revFd2 := calcBlock("Reverse FD - Compute period of investment", [3]string{"Maturity Value", "Initial amount", "Annual rate of interest"}, scroll1, "Period of investment", "Interest",
-		func(mv, p, r float64) (float64, float64) {
-			t := (math.Log(mv/p) / math.Log(1+r/400)) / 4
-			return t, mv - p
-		})
+		videoLink, videoName := YouTubeSearch(reader, query)
+		if videoLink == "" {
+			continue
+		}
 
-	// --- RD Section Blocks ---
-	rdBlock := calcBlock("RD", [3]string{"Monthly deposit", "Annual rate of interest", "Period of investment in years"}, scroll2, "Maturity value", "Interest",
-		func(mi, r, t float64) (float64, float64) {
-			mv := mi * (math.Pow(1+(r/400), 4*t) - 1) / (1 - (1 / math.Pow(1+(r/400), 1.0/3.0)))
-			return mv, mv - (t * mi * 12)
-		})
+		fmt.Printf("\nSelected: %s\n", videoName)
+		fmt.Println("Choose Action:")
+		fmt.Println("1. Download Audio directly (via yt-dlp - Recommended)")
+		fmt.Println("2. Open in Browser & Record System Audio (Legacy Mode)")
+		fmt.Print("Select option (1/2): ")
 
-	revRd1 := calcBlock("Reverse RD - Compute monthly deposit", [3]string{"Maturity Value", "Annual rate of interest", "Period of investment in years"}, scroll2, "Monthly investment", "Interest",
-		func(mv, r, t float64) (float64, float64) {
-			mi := mv * (1 - (1 / math.Pow(1+(r/400), 1.0/3.0))) / (math.Pow(1+(r/400), 4*t) - 1)
-			return mi, mv - (t * mi * 12)
-		})
+		optStr, _ := reader.ReadString('\n')
+		optStr = strings.TrimSpace(optStr)
 
-	revRd2 := calcBlock("Reverse RD - Compute period of investment", [3]string{"Maturity Value", "Annual rate of interest", "Monthly investment"}, scroll2, "Period of investment in years", "Interest",
-		func(mv, r, mi float64) (float64, float64) {
-			t := (math.Log(((mv/mi)*(1-(1/math.Pow(1+(r/400), 1.0/3.0))))+1) / math.Log(1+(r/400))) / 4
-			return t, mv - (mi * t * 12)
-		})
+		saveFileName := sanitizeFilename(videoName) + ".flac"
 
-	// --- Construct Pages ---
-	scroll1.Content = container.NewVBox(
-		widget.NewButton("Switch to RD", func() { w.SetContent(scroll2); w.Resize(fyne.NewSize(400, 700)) }),
-		fdBlock, revFd1, revFd2,
-	)
+		if optStr == "1" {
+			downloadDirectAudio(videoLink, saveFileName)
+		} else {
+			launchAndRecord(videoLink, saveFileName)
+		}
+	}
+}
 
-	scroll2.Content = container.NewVBox(
-		widget.NewButton("Switch to FD", func() { w.SetContent(scroll1); w.Resize(fyne.NewSize(400, 700)) }),
-		rdBlock, revRd1, revRd2,
-	)
+// YouTubeSearch scrapes/searches and presents user selection cleanly
+func YouTubeSearch(reader *bufio.Reader, query string) (string, string) {
+	searchURL := "https://www.youtube.com/results?search_query=" + url.QueryEscape(query)
 
-	w.SetContent(scroll1)
-	w.Resize(fyne.NewSize(400, 700))
-	w.ShowAndRun()
+	req, _ := http.NewRequest("GET", searchURL, nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Println("Network error:", err)
+		return "", ""
+	}
+	defer resp.Body.Close()
+
+	// Use safely parsed JSON or yt-dlp search fallback
+	results := searchYtDlp(query)
+	if len(results) == 0 {
+		fmt.Println("No videos found or search blocked.")
+		return "", ""
+	}
+
+	fmt.Println("\nSearch Results:")
+	for idx, item := range results {
+		fmt.Printf("%2d. %s (%s)\n", idx+1, item.Title, item.URL)
+	}
+	fmt.Println(" 0. Cancel search")
+
+	for {
+		fmt.Print("\nSelect index (0 to cancel): ")
+		input, _ := reader.ReadString('\n')
+		idx, err := strconv.Atoi(strings.TrimSpace(input))
+
+		if err != nil || idx < 0 || idx > len(results) {
+			fmt.Println("Invalid selection. Try again.")
+			continue
+		}
+		if idx == 0 {
+			return "", ""
+		}
+		return results[idx-1].URL, results[idx-1].Title
+	}
+}
+
+// Uses yt-dlp for search JSON metadata safely (no manual fragile scraping needed)
+func searchYtDlp(query string) []VideoData {
+	cmd := exec.Command("yt-dlp", fmt.Sprintf("ytsearch10:%s", query), "--dump-json", "--default-search", "ytsearch")
+	out, err := cmd.Output()
+	if err != nil {
+		// If yt-dlp isn't installed, fallback notice
+		fmt.Println("Notice: 'yt-dlp' CLI not found. Falling back to basic browser mode...")
+		return []VideoData{{Title: query, URL: "https://www.youtube.com/results?search_query=" + url.QueryEscape(query)}}
+	}
+
+	var results []VideoData
+	lines := strings.Split(string(out), "\n")
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var entry struct {
+			Title    string `json:"title"`
+			WebpageURL string `json:"webpage_url"`
+		}
+		if err := json.Unmarshal([]byte(line), &entry); err == nil {
+			results = append(results, VideoData{Title: entry.Title, URL: entry.WebpageURL})
+		}
+	}
+	return results
+}
+
+// Directly extracts audio stream in high quality without recording desktop noise
+func downloadDirectAudio(videoURL, outputFile string) {
+	fmt.Printf("Downloading high-quality FLAC audio directly to '%s'...\n", outputFile)
+	cmd := exec.Command("yt-dlp", "-x", "--audio-format", "flac", "-o", outputFile, videoURL)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("Download failed: %v\n", err)
+	} else {
+		fmt.Println("Download complete successfully!")
+	}
+}
+
+// Legacy record option
+func launchAndRecord(videoURL, outputFile string) {
+	fmt.Println("Launching default browser...")
+	if err := openBrowser(videoURL); err != nil {
+		fmt.Println("Error opening browser:", err)
+		return
+	}
+
+	fmt.Println("Recording system audio via FFmpeg... Press Ctrl+C or stop FFmpeg when done.")
+	var cmd *exec.Cmd
+
+	if runtime.GOOS == "linux" {
+		cmd = exec.Command("ffmpeg", "-f", "pulse", "-i", "@DEFAULT_SINK@.monitor", "-c:a", "flac", outputFile)
+	} else {
+		fmt.Println("System audio recording in this script is configured for Linux PulseAudio only.")
+		return
+	}
+
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("FFmpeg finished/stopped: %v\n", err)
+	}
+}
+
+func openBrowser(url string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("cmd", "/c", "start", url)
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "linux":
+		cmd = exec.Command("xdg-open", url)
+	default:
+		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
+	}
+	return cmd.Start()
+}
+
+func sanitizeFilename(name string) string {
+	reg := regexp.MustCompile(`[^a-zA-Z0-9_\-]+`)
+	return reg.ReplaceAllString(name, "_")
 }
