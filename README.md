@@ -1,4 +1,4 @@
-# go-systems
+# my programs
 
 A collection of small, self-contained Go programs covering file utilities, media tools, and desktop apps.
 
