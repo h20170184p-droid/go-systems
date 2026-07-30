@@ -1,6 +1,6 @@
-# my programs
+# my-systems
 
-A collection of small, self-contained Go programs covering file utilities, media tools, and desktop apps.
+A collection of small, self-contained programs covering file utilities, media tools, desktop apps, and mobile apps. Primarily Go, with one Flutter/Dart project.
 
 ---
 
@@ -137,11 +137,37 @@ Or use the pre-built binary (place `browser` in the same directory):
 ./tpad
 ```
 
+### `main.dart` — Multi-PDF Reader (Android)
+
+A Flutter app for opening and reading multiple PDFs simultaneously on Android. PDFs are tracked in a custom linked-list structure and can be navigated with prev/next buttons in the app bar. Each PDF remembers the last page you were on when you switch away.
+
+**Features:**
+- Open multiple PDFs at once via the system file picker
+- Navigate between open PDFs with ← → buttons in the app bar
+- Page position saved per PDF — resuming where you left off when switching back
+- Close individual PDFs without affecting others
+- Pinch-to-zoom support via `pdfx`
+
+**Dependencies:** `pdfx`, `file_picker`
+
+**Usage:**
+```bash
+flutter pub get
+flutter run   # connected Android device or emulator
+```
+
+To build an APK:
+```bash
+flutter build apk
+```
+
 ---
 
 ## Building
 
-Each tool is its own `package main`. Build individually:
+### Go tools
+
+Each Go tool is its own `package main`. Build individually:
 
 ```bash
 go build -o scrambler scrambler.go
@@ -154,17 +180,26 @@ go build -o tpad tpad.go
 
 For `tpad`, the `browser` binary must be in the same directory as the `tpad` binary at runtime.
 
+### Flutter (PDF Reader)
+
+```bash
+cd Multi_PDF_Reader
+flutter pub get
+flutter build apk
+```
+
 ---
 
 ## Requirements
 
-| Tool | External deps |
-|---|---|
-| `scrambler` / `unscrambler` | None |
-| `text-embed` | None |
-| `YouTubeAudioD` | `yt-dlp`, `ffmpeg` (legacy mode), PulseAudio (legacy mode) |
-| `financial_FD_RD` | Fyne native deps |
-| `browser` | WebKit/GTK (Linux), WebView2 (Windows), WKWebView (macOS) |
-| `tpad` | Fyne native deps, `browser` binary |
+| Tool | Language | External deps |
+|---|---|---|
+| `scrambler` / `unscrambler` | Go | None |
+| `text-embed` | Go | None |
+| `YouTubeAudioD` | Go | `yt-dlp`, `ffmpeg` (legacy mode), PulseAudio (legacy mode) |
+| `financial_FD_RD` | Go | Fyne native deps |
+| `browser` | Go | WebKit/GTK (Linux), WebView2 (Windows), WKWebView (macOS) |
+| `tpad` | Go | Fyne native deps, `browser` binary |
+| PDF Reader | Dart/Flutter | Flutter SDK, Android SDK |
 
-Go 1.18+ recommended.
+Go 1.18+ recommended. Flutter 3.x+ recommended.
