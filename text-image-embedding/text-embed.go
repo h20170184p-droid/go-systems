@@ -13,7 +13,6 @@ import (
 )
 
 // A custom 5x5 pixel square font map for sharp, compact text rendering
-// A complete 5x5 font map covering every standard QWERTY keyboard symbol
 var font5x5 = map[rune][5]uint8{
 	// Lowercase letters
 	'a': {0x06, 0x09, 0x0F, 0x09, 0x09}, 'b': {0x0E, 0x09, 0x0E, 0x09, 0x0E},
@@ -71,165 +70,161 @@ var font5x5 = map[rune][5]uint8{
 	'?': {0x0E, 0x01, 0x02, 0x00, 0x04}, '/': {0x01, 0x02, 0x04, 0x08, 0x10},
 }
 
+func readInput(reader *bufio.Reader, prompt string) string {
+	fmt.Print(prompt)
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		fmt.Println("Error reading input:", err)
+		return ""
+	}
+	input = strings.TrimSpace(input)
+	if input == "~Exit~" {
+		fmt.Println("Exiting program.")
+		os.Exit(0)
+	}
+	return input
+}
+
+func loadImage(reader *bufio.Reader) (image.Image, error) {
+	for {
+		fileName := readInput(reader, "Enter the image file name: ")
+		if fileName == "" {
+			continue
+		}
+
+		fileContents, err := os.ReadFile(fileName)
+		if err != nil {
+			fmt.Println("Error opening image file:", err)
+			continue
+		}
+
+		img, _, err := image.Decode(bytes.NewReader(fileContents))
+		if err != nil {
+			fmt.Println("Error decoding image:", err)
+			continue
+		}
+
+		return img, nil
+	}
+}
+
+func loadTextFile(reader *bufio.Reader) (string, error) {
+	for {
+		fileName := readInput(reader, "Enter a text file (.txt or .md): ")
+		if fileName == "" {
+			continue
+		}
+
+		fileBytes, err := os.ReadFile(fileName)
+		if err != nil {
+			fmt.Println("Couldn't open text source file:", err)
+			continue
+		}
+
+		code := string(fileBytes)
+		return strings.Join(strings.Fields(code), ""), nil
+	}
+}
+
 func main() {
 	reader := bufio.NewReader(os.Stdin)
-	var file_name string
-	var e1 error
 	fmt.Println("Force quit with Ctrl + C. Pro tip: exit by entering ~Exit~.")
 
-TAKE_FILE_NAME:
-	fmt.Println("Enter the image file name: ")
-	file_name, e1 = reader.ReadString('\n')
-	if e1 != nil {
-		fmt.Println("The following error occurred: ", e1)
-		goto TAKE_FILE_NAME
-	}
-
-	file_name = strings.TrimSpace(file_name)
-	if file_name == "~Exit~" {
-		fmt.Println("Exiting the program!")
-		os.Exit(0)
-	}
-
-	file_contents, e2 := os.ReadFile(file_name)
-	if e2 != nil {
-		fmt.Println("Error opening image file: ", e2)
-		goto TAKE_FILE_NAME
-	}
-
-	imc, _, e3 := image.Decode(bytes.NewReader(file_contents))
-	if e3 != nil {
-		fmt.Println("Error decoding image: ", e3)
-		goto TAKE_FILE_NAME
-	}
-
-	w := imc.Bounds().Dx()
-	h := imc.Bounds().Dy()
-	p := w * h
-	// Load code text source file
-	fmt.Println("Enter a text file .txt or .md: ")
-	file_name2, e4 := reader.ReadString('\n')
-	if e4 != nil {
-		fmt.Println("The following error occurred: ", e4)
-	}
-	file_name2 = strings.TrimSpace(file_name2)
-	if file_name2 == "~Exit~" {
-		fmt.Println("Pre-mature exit")
-		os.Exit(0)
-	}
-
-	file_2, e5 := os.ReadFile(file_name2)
-	if e5 != nil {
-		fmt.Println("Couldn't open text source file. Error: ", e5)
-		goto TAKE_FILE_NAME
-	}
-	q := len(file_2)
-
-	// What will be even better is for the file_2 bytes to be jumbled as per a particular pattern.
-	// What will be even better is for this code to run in as a parallel program. go routines.
-
-	code := string(file_2)
-	code = strings.Join(strings.Fields(code), "") // Strip whitespace
-	var k int = 0
-	var last int = len(code)
-
-	// var symbol_count int = 0
-
-	// Set square cell parameters (Each character is 5x5 pixels + 1px spacing = 6px)
-	const size = 6
-
-	// Allocate a big high-resolution canvas to draw letter shapes cleanly
-	outImg := image.NewRGBA(image.Rect(0, 0, w*size, h*size))
-	bg := color.RGBA{255, 255, 255, 255} // Black background context
-
-	// Fill overall background black
-	for y := 0; y < h*size; y++ {
-		for x := 0; x < w*size; x++ {
-			outImg.SetRGBA(x, y, bg)
+	for {
+		imc, err := loadImage(reader)
+		if err != nil {
+			continue
 		}
-	}
 
-	if p > q {
-		fmt.Println("The image is bigger than the contents of the file. Good to go.")
+		w := imc.Bounds().Dx()
+		h := imc.Bounds().Dy()
+		p := w * h
 
-	} else {
-		fmt.Println("The contents of text are larger than that of the image. Continue? y/N: ")
-		b := make([]byte, 1)
-		if os.Stdin.Read(b); b[0] == 'n' || b[0] == 'N' {
-			fmt.Println("Exiting...")
-			os.Exit(0)
+		code, err := loadTextFile(reader)
+		if err != nil {
+			continue
+		}
+
+		q := len(code)
+		if p > q {
+			fmt.Println("The image is bigger than the contents of the file. Good to go.")
 		} else {
+			fmt.Print("The contents of text are larger than that of the image. Continue? y/N: ")
+			var response string
+			fmt.Scanln(&response)
+			if strings.ToLower(response) != "y" {
+				fmt.Println("Exiting...")
+				os.Exit(0)
+			}
 			fmt.Println("Continuing")
 		}
-	}
 
-	symbol := " "
-	// Loop over original image pixels
-	for j := range h {
-		for i := range w {
-			// Extract color data from the active pixel
-			r, g, b, a := imc.At(i, j).RGBA()
-			r8, g8, b8, a8 := uint8(r>>8), uint8(g>>8), uint8(b>>8), uint8(a>>8)
-			pxColor := color.RGBA{r8, g8, b8, a8}
+		const size = 6
+		outImg := image.NewRGBA(image.Rect(0, 0, w*size, h*size))
+		bg := color.RGBA{255, 255, 255, 255}
 
-			// Apply symbol classification rule
-
-			if k < last {
-				symbol = string(code[k])
-				k++
+		// Fill background
+		for y := 0; y < h*size; y++ {
+			for x := 0; x < w*size; x++ {
+				outImg.SetRGBA(x, y, bg)
 			}
+		}
 
-			if k == last {
-				k = 0
-			}
+		var k int
+		last := len(code)
 
-			// Skip drawing if it remains an empty space character
-			if symbol == " " {
-				continue
-			}
+		// Render text onto canvas
+		for j := 0; j < h; j++ {
+			for i := 0; i < w; i++ {
+				r, g, b, a := imc.At(i, j).RGBA()
+				pxColor := color.RGBA{uint8(r >> 8), uint8(g >> 8), uint8(b >> 8), uint8(a >> 8)}
 
-			// Convert letter into character mapping rows
-			ch := rune(symbol[0])
-			bitmap, found := font5x5[ch]
-			if !found {
-				bitmap = font5x5['x'] // Fallback visual character. Not sure if this is necessary.
-			}
+				var symbol string
+				if last > 0 {
+					symbol = string(code[k])
+					k = (k + 1) % last
+				}
 
-			// Render the 5x5 glyph shapes directly onto the pixel block coordinates
-			offsetX := i * size
-			offsetY := j * size
+				if symbol == " " || symbol == "" {
+					continue
+				}
 
-			for row := range 5 {
-				bits := bitmap[row]
-				for col := range 5 {
-					// Read bits from left to right (using bitwise shift)
-					if (bits & (1 << (4 - uint(col)))) != 0 {
-						outImg.SetRGBA(offsetX+col, offsetY+row, pxColor)
+				ch := rune(symbol[0])
+				bitmap, found := font5x5[ch]
+				if !found {
+					bitmap = font5x5['x']
+				}
+
+				offsetX := i * size
+				offsetY := j * size
+
+				for row := 0; row < 5; row++ {
+					bits := bitmap[row]
+					for col := 0; col < 5; col++ {
+						if (bits & (1 << (4 - uint(col)))) != 0 {
+							outImg.SetRGBA(offsetX+col, offsetY+row, pxColor)
+						}
 					}
 				}
 			}
-			// symbol_count += 1
 		}
-	}
 
-	// fmt.Println("The total number of symbols processed: ", symbol_count)
-	// Save output PNG file
-	fmt.Println("Enter the output file name (The extension .png will be auto appended): ")
-	var outname string
-	fmt.Scan(&outname)
-	outPath := outname + ".png"
-	outFile, e6 := os.Create(outPath)
-	if e6 != nil {
-		fmt.Println("Error creating output image: ", e6)
-		goto TAKE_FILE_NAME
-	}
-	defer outFile.Close()
+		outName := readInput(reader, "Enter the output file name (extension .png will be auto-appended): ")
+		outPath := outName + ".png"
 
-	if err := png.Encode(outFile, outImg); err != nil {
-		fmt.Println("Error encoding PNG: ", err)
-		goto TAKE_FILE_NAME
-	}
+		outFile, err := os.Create(outPath)
+		if err != nil {
+			fmt.Println("Error creating output image:", err)
+			continue
+		}
 
-	fmt.Printf("Finished! File written to: %s\n\n", outPath)
-	goto TAKE_FILE_NAME
+		if err := png.Encode(outFile, outImg); err != nil {
+			outFile.Close()
+			fmt.Println("Error encoding PNG:", err)
+			continue
+		}
+		outFile.Close()
+
+		fmt.Printf("Finished! File written to: %s\n\n", outPath)
+	}
 }
